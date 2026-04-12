@@ -736,3 +736,107 @@ npx @privy-io/agent-wallet-cli rpc --json '{
 ```
 
 **Without sponsorship:** Keep ~0.01 BNB in the wallet for gas. Covers 300+ trades.
+
+---
+
+## 7. Monitoring & Alerting
+
+The `scripts/monitor.js` tool provides real-time monitoring of 42 markets with configurable alerts via Slack and/or Telegram.
+
+### What It Monitors
+
+| Monitor | Description | Default Threshold |
+|---------|-------------|-------------------|
+| **Price movements** | Alerts when any outcome token price changes significantly | ±10% |
+| **Volume spikes** | Detects unusual trading activity on outcomes | +200% in 1h |
+| **New markets** | Notifies when new markets appear with volume | >$100 volume |
+| **Markets ending** | Warns before a market's trading window closes | 24h before |
+| **Position PnL** | Tracks your open positions for profit/loss thresholds | +50% / -20% |
+| **Resolved markets** | Alerts when markets resolve or finalise | Immediate |
+| **Whale trades** | Detects large trades in the last hour | >$500 |
+
+### Usage
+
+```bash
+# Single scan (ideal for cron)
+node scripts/monitor.js run
+
+# Continuous monitoring (runs every 5 min by default)
+node scripts/monitor.js watch
+
+# Check monitor state and recent alerts
+node scripts/monitor.js status
+
+# Reset state (start fresh)
+node scripts/monitor.js reset
+```
+
+### Environment Variables
+
+```bash
+# Required for position monitoring
+export BSC_WALLET_ADDRESS="0xYOUR_WALLET"
+
+# Alert destinations (one or both)
+export SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+export TELEGRAM_BOT_TOKEN="your_bot_token"
+export TELEGRAM_CHAT_ID="your_chat_id"
+
+# Tuning (all optional)
+export MONITOR_INTERVAL=300       # seconds between scans in watch mode
+export PRICE_CHANGE_PCT=10        # % price change to alert
+export VOLUME_SPIKE_PCT=200       # % volume spike to alert
+export PNL_LOSS_PCT=20            # % unrealized loss to alert
+export PNL_PROFIT_PCT=50          # % unrealized profit to alert
+export NEW_MARKET_MIN_VOL=100     # min $ volume for new market alert
+export MARKET_ENDING_HOURS=24     # hours before end to alert
+```
+
+### Running as Cron Job
+
+```bash
+# Scan every 5 minutes
+*/5 * * * * cd /path/to/wenlanbot && node scripts/monitor.js run >> /tmp/42-monitor.log 2>&1
+```
+
+### Running as Systemd Service
+
+```ini
+# /etc/systemd/system/42-monitor.service
+[Unit]
+Description=42 Market Monitor
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /path/to/wenlanbot/scripts/monitor.js watch
+Restart=always
+Environment=BSC_WALLET_ADDRESS=0xYOUR_WALLET
+Environment=SLACK_WEBHOOK=https://hooks.slack.com/services/...
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Alert Format
+
+Alerts are sent with emoji icons for quick scanning:
+
+- 📈 Price movements
+- 🔥 Volume spikes
+- 🆕 New markets
+- ⏰ Markets ending soon
+- 💰 Position in profit
+- 🔻 Position at loss
+- ✅ Market resolved
+- 🏁 Market finalised
+- 🐋 Whale trades
+
+### State Management
+
+The monitor maintains state in `monitor-state.json` to avoid duplicate alerts:
+- Price snapshots for delta calculation
+- Known markets to detect new ones
+- Alert deduplication keys
+- Last 200 alerts for history
+
+State persists across restarts. Use `monitor.js reset` to start fresh.
