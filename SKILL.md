@@ -427,7 +427,23 @@ console.log("Balance:", ethers.formatUnits(balance, 18), "OT");
 
 ### 3.10 Sell Outcome Tokens
 
-Selling requires only **one multicall operation** (no transfer needed):
+Before your first sell on a market, you must approve the Router as an **operator** on the market's ERC6909 contract (one-time per market):
+
+```javascript
+const ERC6909_WRITE = [
+  "function setOperator(address operator, bool approved) returns (bool)",
+  "function isOperator(address owner, address operator) view returns (bool)"
+];
+const marketContract = new ethers.Contract(market, ERC6909_WRITE, wallet);
+
+const isApproved = await marketContract.isOperator(WALLET, ROUTER_ADDR);
+if (!isApproved) {
+  const tx = await marketContract.setOperator(ROUTER_ADDR, true);
+  await tx.wait();
+}
+```
+
+Then sell with **one multicall operation**:
 
 ```javascript
 const otToSell = ethers.parseUnits("100", 18);
@@ -555,6 +571,9 @@ ethers.js v6 enforces EIP-55. Fix with `ethers.getAddress(addr.toLowerCase())`.
 
 ### 10. Use slippage protection in production
 Set `minOutOrMaxIn` in SwapParams to protect against price movement and sandwich attacks.
+
+### 11. Selling requires setOperator approval first
+Before your first sell on a market, call `market.setOperator(ROUTER, true)` — the Router needs ERC6909 operator permission to move your outcome tokens. This is one-time per market per wallet.
 
 ---
 
