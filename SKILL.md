@@ -257,6 +257,7 @@ curl -s "https://rest.ft.42.space/api/v1/market-data/positions?user=0xYOUR_WALLE
 | **Router** | `0x88888888338e60bfB4657187169cFFa5c8640E42` | Entry point for all trades (multicall) |
 | **Factory** | `0xF21b2D4F8989b27f732e369907F25f0E8D95Fe62` | Market registry, config, question data |
 | **Curve** | `0x0443E04e70E4285a6cA73eacaC5267f3B4cBb7Da` | Bonding curve pricing engine |
+| **Lens** | `0x9a9846037238599b10f60a59C2607a8c3159E827` | Simulation & snapshots (recommended for quotes) |
 | **USDT** | `0x55d398326f99059fF775485246999027B3197955` | Collateral (BEP-20, 18 decimals) |
 
 Architecture:
@@ -264,6 +265,7 @@ Architecture:
 User → Router (multicall) → Market (ERC6909 tokens)
                           → Curve (pricing)
        Factory (registry) → Market config / question data
+       Lens (read-only)   → Simulations & snapshots (pre/post state)
 ```
 
 ### 3.2 Setup
@@ -365,6 +367,52 @@ const [collateralBack, sellFee] = await curve.calRedeemValueByOtDelta(
 console.log("You'd receive:", ethers.formatUnits(collateralBack, 18), "USDT");
 ```
 
+### 3.6b Lens Simulations (Recommended)
+
+The **Lens** contract provides richer simulations than the Curve — returning pre/post market state and price impact in a single call:
+
+```javascript
+const lens = new ethers.Contract(
+  "0x9a9846037238599b10f60a59C2607a8c3159E827", LENS_ABI, provider
+);
+
+// Full market snapshot (all outcomes at once)
+const snapshot = await lens.snapshotMarket.staticCall(market);
+snapshot.ots.forEach((ot, i) => {
+  console.log(`Token ${i}: price=${ethers.formatUnits(ot.price, 18)}, supply=${ethers.formatUnits(ot.supply, 18)}`);
+});
+
+// Buy simulation (no wallet needed)
+const dataGuess = ethers.AbiCoder.defaultAbiCoder().encode(
+  ["uint256", "uint256", "uint256"],
+  [0n, 100n, 1000000000000000n]  // guessOffchain=0, maxIter=100, eps=0.1%
+);
+const sim = await lens.simulateMintNoUser.staticCall(
+  market, tokenId, ethers.parseUnits("10", 18), true, "0x", dataGuess
+);
+console.log("OT received:", ethers.formatUnits(sim.quote.otToUser, 18));
+console.log("Price impact:", ethers.formatUnits(sim.pre.price, 18), "→", ethers.formatUnits(sim.post.price, 18));
+
+// Sell simulation
+const sellSim = await lens.simulateRedeemNoUser.staticCall(
+  market, tokenId, otAmountWei, true, "0x", "0x"
+);
+console.log("USDT back:", ethers.formatUnits(sellSim.quote.collateralToUser, 18));
+```
+
+**dataGuess encoding** (3 params — helps the on-chain binary search converge faster):
+```javascript
+encodeAbiParameters(
+  ["uint256", "uint256", "uint256"],
+  [otDeltaGuessOffchain, maxIterations, eps]
+)
+// otDeltaGuessOffchain: expected OT output from simulation (0 for first call)
+// maxIterations: 100 for simulation, 50 for execution
+// eps: 0.1% (1e15) for $5-$3000 trades, 20% (2e17) for <$5, proportional for >$3000
+```
+
+For **sells**, `dataGuess` should be `"0x"` — no guessing needed since OT input is exact.
+
 ### 3.7 Approve USDT (One-Time)
 
 ```javascript
@@ -427,18 +475,18 @@ console.log("Balance:", ethers.formatUnits(balance, 18), "OT");
 
 ### 3.10 Sell Outcome Tokens
 
-Before your first sell on a market, you must approve the Router as an **operator** on the market's ERC6909 contract (one-time per market):
+Before selling, approve the Router to spend your specific outcome tokens (per tokenId):
 
 ```javascript
-const ERC6909_WRITE = [
-  "function setOperator(address operator, bool approved) returns (bool)",
-  "function isOperator(address owner, address operator) view returns (bool)"
+const ERC6909_ABI = [
+  "function allowance(address owner, address spender, uint256 id) view returns (uint256)",
+  "function approve(address spender, uint256 id, uint256 amount) returns (bool)"
 ];
-const marketContract = new ethers.Contract(market, ERC6909_WRITE, wallet);
+const marketContract = new ethers.Contract(market, ERC6909_ABI, wallet);
 
-const isApproved = await marketContract.isOperator(WALLET, ROUTER_ADDR);
-if (!isApproved) {
-  const tx = await marketContract.setOperator(ROUTER_ADDR, true);
+const allowance = await marketContract.allowance(WALLET, ROUTER_ADDR, tokenId);
+if (allowance < otToSell) {
+  const tx = await marketContract.approve(ROUTER_ADDR, tokenId, ethers.MaxUint256);
   await tx.wait();
 }
 ```
@@ -522,6 +570,8 @@ Full JSON ABIs are in the `references/` directory:
 - `references/router-abi.json` — Router (9 functions)
 - `references/factory-abi.json` — Factory (44 functions, 3 events)
 - `references/curve-abi.json` — Curve (19 functions)
+- `references/lens-abi.json` — Lens (7 functions: simulateMint, simulateRedeem, snapshots)
+- `references/market-abi.json` — Market/ERC6909 (78 functions: balanceOf, approve, setOperator, etc.)
 
 ### Ready-to-Use Script
 
@@ -572,8 +622,11 @@ ethers.js v6 enforces EIP-55. Fix with `ethers.getAddress(addr.toLowerCase())`.
 ### 10. Use slippage protection in production
 Set `minOutOrMaxIn` in SwapParams to protect against price movement and sandwich attacks.
 
-### 11. Selling requires setOperator approval first
-Before your first sell on a market, call `market.setOperator(ROUTER, true)` — the Router needs ERC6909 operator permission to move your outcome tokens. This is one-time per market per wallet.
+### 11. Selling requires ERC6909 approval
+Call `market.approve(ROUTER, tokenId, maxUint256)` before selling. For claiming, use `market.setOperator(ROUTER, true)` instead — claiming needs operator access.
+
+### 12. Use Lens for simulations, not Curve directly
+The Lens contract (`0x9a98...E827`) provides `simulateMintNoUser` and `simulateRedeemNoUser` which return pre/post state + quotes in one call. Pass the simulation's `otToUser` as `guessOffchain` in `dataGuess` when executing — this reduces gas by helping the on-chain binary search converge faster.
 
 ---
 
