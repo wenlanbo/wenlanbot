@@ -8,6 +8,8 @@
   },
   "scripts": {
     "trade": "bun scripts/trade.ts",
+    "trade:fast": "bun dist/trade.js",
+    "build": "bun build --target=bun --minify --sourcemap=inline --outfile dist/trade.js scripts/trade.ts",
     "gen-abis": "bun scripts/gen-abis.ts",
     "typecheck": "tsc --noEmit",
     "bench": "bash bench/run.sh"

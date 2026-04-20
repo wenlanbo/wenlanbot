@@ -8,24 +8,73 @@ A complete, agent-agnostic guide for AI agents to trade prediction markets on [4
 - **references/** — Complete smart contract ABIs (Router, Factory, Curve)
 - **scripts/trade.js** — Ready-to-use CLI trading tool
 
-## Quick Start
+## Prerequisites
+
+- **[Bun](https://bun.sh)** — primary runtime. `curl -fsSL https://bun.sh/install | bash`
+- A BSC wallet with some **BNB** for gas (~0.01 BNB ≈ $0.03 per trade) and **B-USDT (BEP-20, 18 decimals)** for trade collateral.
+- Optional: a private BSC RPC. The default (`https://bsc-dataseed1.binance.org`) works for light use but is rate-limited.
+
+## Install
 
 ```bash
-# Install dependencies
-npm install ethers
+git clone git@github.com:wenlanbo/wenlanbot.git wenlanbot
+cd wenlanbot
+bun install
+```
 
-# Set environment variables
-export BSC_PRIVATE_KEY="your_private_key"
-export BSC_WALLET_ADDRESS="your_wallet_address"
+## Configure
+
+Copy the example env and fill in your key:
+
+```bash
+cp .env.example .env
+# edit .env — BSC_PRIVATE_KEY is required
+```
+
+> For running `scripts/trade.js` / `scripts/monitor.js` under Node, pass the flag: `node --env-file=.env scripts/trade.js status`.
+
+### Env vars
+
+| Variable | Required | Notes |
+|---|---|---|---|
+| `BSC_PRIVATE_KEY` | yes | `0x` + 64 hex. Wallet address is derived automatically. |
+| `BSC_RPC` | no | Defaults to `https://bsc-dataseed1.binance.org`. |
+| `BSC_WALLET_ADDRESS` | only for `monitor.js` | `trade.ts` and `trade.js` both derive this from `BSC_PRIVATE_KEY`. |
+| `SLACK_WEBHOOK`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MONITOR_*` | optional | See `SKILL.md` §7 for the full list. |
+
+## Usage
+
+```bash
+# Help
+bun scripts/trade.ts help
 
 # Check wallet status
-node scripts/trade.js
+bun scripts/trade.ts
 
 # Get market info
-node scripts/trade.js info 0xMARKET_ADDRESS
+bun scripts/trade.ts info 0xMARKET_ADDRESS
 
-# Buy outcome tokens
-node scripts/trade.js buy 0xMARKET_ADDRESS 1 10  # tokenId=1, 10 USDT
+# Trade
+bun scripts/trade.ts buy 0xMARKET_ADDRESS 1 10 [slippage%] # tokenId=1, 10 USDT
+bun scripts/trade.ts sell 0xMARKET_ADDRESS 1 100 [slippage%] # tokenId=1, 100 OT
+```
+
+`bun run trade <cmd>` shortcuts the same thing via `package.json`.
+
+## Faster cold start (optional)
+
+Build and run a tree-shaken bundle to avoid traversing module graph.
+
+```bash
+bun run build
+bun dist/trade.js help
+```
+
+For a zero-dependency distributable (no Bun required on the target machine):
+
+```bash
+bun build --compile --minify --target=bun --outfile bin/trade scripts/trade.ts
+./bin/trade help
 ```
 
 ## For AI Agents
