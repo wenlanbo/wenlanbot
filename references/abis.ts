@@ -2689,30 +2689,6 @@ export const lensAbi = [
 
 export const lensV2Abi = [
   {
-    "type": "constructor",
-    "inputs": [
-      {
-        "name": "_router",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "ROUTER",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract FTRouterV2"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
     "type": "function",
     "name": "getUserState",
     "inputs": [
@@ -2738,6 +2714,11 @@ export const lensV2Abi = [
             "type": "tuple[]",
             "internalType": "struct UserOtSnapshot[]",
             "components": [
+              {
+                "name": "tokenId",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
               {
                 "name": "price",
                 "type": "uint256",
@@ -2855,7 +2836,7 @@ export const lensV2Abi = [
             ]
           },
           {
-            "name": "otClaimable",
+            "name": "collateralClaimable",
             "type": "uint256",
             "internalType": "uint256"
           }
@@ -2911,6 +2892,11 @@ export const lensV2Abi = [
         "internalType": "struct OtSnapshot",
         "components": [
           {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "price",
             "type": "uint256",
             "internalType": "uint256"
@@ -2937,6 +2923,11 @@ export const lensV2Abi = [
         "type": "tuple",
         "internalType": "struct OtSnapshot",
         "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           {
             "name": "price",
             "type": "uint256",
@@ -3041,6 +3032,11 @@ export const lensV2Abi = [
         "internalType": "struct UserOtSnapshot",
         "components": [
           {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "price",
             "type": "uint256",
             "internalType": "uint256"
@@ -3077,6 +3073,11 @@ export const lensV2Abi = [
         "type": "tuple",
         "internalType": "struct UserOtSnapshot",
         "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           {
             "name": "price",
             "type": "uint256",
@@ -3193,6 +3194,11 @@ export const lensV2Abi = [
         "internalType": "struct OtSnapshot[]",
         "components": [
           {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "price",
             "type": "uint256",
             "internalType": "uint256"
@@ -3219,6 +3225,11 @@ export const lensV2Abi = [
         "type": "tuple[]",
         "internalType": "struct OtSnapshot[]",
         "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           {
             "name": "price",
             "type": "uint256",
@@ -3330,6 +3341,11 @@ export const lensV2Abi = [
         "internalType": "struct UserOtSnapshot[]",
         "components": [
           {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "price",
             "type": "uint256",
             "internalType": "uint256"
@@ -3366,6 +3382,11 @@ export const lensV2Abi = [
         "type": "tuple[]",
         "internalType": "struct UserOtSnapshot[]",
         "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           {
             "name": "price",
             "type": "uint256",
@@ -3475,6 +3496,11 @@ export const lensV2Abi = [
         "internalType": "struct OtSnapshot",
         "components": [
           {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "price",
             "type": "uint256",
             "internalType": "uint256"
@@ -3501,6 +3527,11 @@ export const lensV2Abi = [
         "type": "tuple",
         "internalType": "struct OtSnapshot",
         "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           {
             "name": "price",
             "type": "uint256",
@@ -3610,6 +3641,11 @@ export const lensV2Abi = [
         "internalType": "struct UserOtSnapshot",
         "components": [
           {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "price",
             "type": "uint256",
             "internalType": "uint256"
@@ -3646,6 +3682,11 @@ export const lensV2Abi = [
         "type": "tuple",
         "internalType": "struct UserOtSnapshot",
         "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           {
             "name": "price",
             "type": "uint256",
@@ -3767,6 +3808,11 @@ export const lensV2Abi = [
         "internalType": "struct OtSnapshot[]",
         "components": [
           {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "price",
             "type": "uint256",
             "internalType": "uint256"
@@ -3793,6 +3839,11 @@ export const lensV2Abi = [
         "type": "tuple[]",
         "internalType": "struct OtSnapshot[]",
         "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           {
             "name": "price",
             "type": "uint256",
@@ -3909,6 +3960,11 @@ export const lensV2Abi = [
         "internalType": "struct UserOtSnapshot[]",
         "components": [
           {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "price",
             "type": "uint256",
             "internalType": "uint256"
@@ -3945,6 +4001,11 @@ export const lensV2Abi = [
         "type": "tuple[]",
         "internalType": "struct UserOtSnapshot[]",
         "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           {
             "name": "price",
             "type": "uint256",
@@ -4033,6 +4094,11 @@ export const lensV2Abi = [
             "type": "tuple[]",
             "internalType": "struct OtSnapshot[]",
             "components": [
+              {
+                "name": "tokenId",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
               {
                 "name": "price",
                 "type": "uint256",
@@ -4166,6 +4232,11 @@ export const lensV2Abi = [
         "internalType": "struct OtSnapshot",
         "components": [
           {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "price",
             "type": "uint256",
             "internalType": "uint256"
@@ -4216,6 +4287,11 @@ export const lensV2Abi = [
         "type": "tuple",
         "internalType": "struct UserOtSnapshot",
         "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           {
             "name": "price",
             "type": "uint256",

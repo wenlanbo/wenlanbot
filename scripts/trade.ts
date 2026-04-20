@@ -21,7 +21,7 @@ import {
   factoryAbi,
   lensV2Abi,
   marketAbi,
-  routerAbi,
+  routerV2Abi,
 } from "../references/abis.ts";
 
 // === CONFIG ===
@@ -35,8 +35,8 @@ function required(name: string, value: string | undefined): string {
 const ROUTER: Address = getAddress(
   "0xaa2dFc5aa2c140DC9246094A914e6D86ecE2eaaa",
 );
-const LENS: Address = getAddress("0xc936813410B0c157324D39EDc18062FE5E2C8189");
-const USDT: Address = getAddress("0x55d398326f99059fF775485246999027B3197955");
+const LENS: Address = getAddress("0xdE24BDaE2551Cb686eA8734Ec1CebF4F0f966C5a");
+const USDT: Address = getAddress("0x61553e2c0373F6767977cACE65719006197C18ce");
 const BEBE: Address = getAddress("0x00000000BEBEDB7C30ee418158e26E31a5A8f3E2");
 const MAX_UINT256: bigint = (1n << 256n) - 1n;
 const BEBE_MODE_SINGLE_BATCH: Hex =
@@ -261,8 +261,8 @@ async function buyOutcome(
   console.log("  Executing...");
   const hash = await walletClient.writeContract({
     address: ROUTER,
-    abi: routerAbi,
-    functionName: "swapSimple",
+    abi: routerV2Abi,
+    functionName: "swap",
     args: [
       market,
       WALLET,
@@ -275,6 +275,8 @@ async function buyOutcome(
       },
       "0x",
       dataGuess,
+      zeroAddress,
+      0n,
     ],
     account,
     chain: bsc,
@@ -329,8 +331,8 @@ async function sellOutcome(
   console.log("  Executing...");
   const hash = await walletClient.writeContract({
     address: ROUTER,
-    abi: routerAbi,
-    functionName: "swapSimple",
+    abi: routerV2Abi,
+    functionName: "swap",
     args: [
       market,
       WALLET,
@@ -343,6 +345,8 @@ async function sellOutcome(
       },
       "0x",
       "0x",
+      zeroAddress,
+      0n,
     ],
     account,
     chain: bsc,
@@ -375,11 +379,10 @@ async function claimMarkets(marketAddrs: readonly string[]): Promise<void> {
 
     const tokenIds: bigint[] = [];
     const amounts: bigint[] = [];
-    for (let j = 0; j < s.ots.length; j++) {
-      const hold = s.ots[j]!.otHolding;
-      if (hold > 0n) {
-        tokenIds.push(BigInt(j));
-        amounts.push(hold);
+    for (const ot of s.ots) {
+      if (ot.otHolding > 0n) {
+        tokenIds.push(ot.tokenId);
+        amounts.push(ot.otHolding);
       }
     }
     if (tokenIds.length === 0) {
@@ -431,11 +434,10 @@ async function bebeClaimMarkets(marketAddrs: readonly string[]): Promise<void> {
 
     const tokenIds: bigint[] = [];
     const amounts: bigint[] = [];
-    for (let j = 0; j < s.ots.length; j++) {
-      const hold = s.ots[j]!.otHolding;
-      if (hold > 0n) {
-        tokenIds.push(BigInt(j));
-        amounts.push(hold);
+    for (const ot of s.ots) {
+      if (ot.otHolding > 0n) {
+        tokenIds.push(ot.tokenId);
+        amounts.push(ot.otHolding);
       }
     }
     if (tokenIds.length === 0) {
@@ -601,8 +603,8 @@ async function showInfo(marketRaw: string): Promise<void> {
   for (let i = 0; i < numOutcomes; i++) {
     const ot = snap.ots[i];
     if (ot === undefined) continue;
-    const name = names[i] ?? `Token ${i}`;
-    console.log(`  [${i}] ${name}`);
+    const name = names[i] ?? `Token ${ot.tokenId}`;
+    console.log(`  [tokenId=${ot.tokenId}] ${name}`);
     console.log(
       `      Price: ${formatUnits(ot.price, 18)} USDT | Supply: ${formatUnits(ot.supply, 18)} OT | Payout/OT: ${formatUnits(ot.payoutPerOt, 18)}`,
     );
@@ -658,23 +660,22 @@ async function showPortfolio(marketRaw: string): Promise<void> {
     `Portfolio for ${WALLET.slice(0, 6)}...${WALLET.slice(-4)} on ${market.slice(0, 10)}...`,
   );
   let totalValue = 0;
-  for (let i = 0; i < snap.ots.length; i++) {
-    const ot = snap.ots[i]!;
+  for (const ot of snap.ots) {
     if (ot.otHolding > 0n) {
       const balFmt = parseFloat(formatUnits(ot.otHolding, 18));
       const priceFmt = parseFloat(formatUnits(ot.price, 18));
       const value = balFmt * priceFmt;
       totalValue += value;
       console.log(
-        `  Token ${i}: ${balFmt} OT x ${priceFmt.toFixed(6)} = ${value.toFixed(4)} USDT`,
+        `  tokenId=${ot.tokenId}: ${balFmt} OT x ${priceFmt.toFixed(6)} = ${value.toFixed(4)} USDT`,
       );
     }
   }
   if (totalValue === 0) console.log("  No positions");
   else console.log(`  Total value: ~${totalValue.toFixed(4)} USDT`);
-  if (snap.state.isFinalised && snap.otClaimable > 0n) {
+  if (snap.state.isFinalised && snap.collateralClaimable > 0n) {
     console.log(
-      `  Claimable: ${formatUnits(snap.otClaimable, 18)} USDT (run \`claim\` or \`bebe-claim\`)`,
+      `  Claimable: ${formatUnits(snap.collateralClaimable, 18)} USDT (run \`claim\` or \`bebe-claim\`)`,
     );
   }
 }
