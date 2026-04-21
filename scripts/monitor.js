@@ -1,9 +1,10 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 // === CONFIG ===
 const API_BASE = "https://rest.ft.42.space";
-const STATE_FILE = process.env.MONITOR_STATE || path.join(__dirname, "../monitor-state.json");
+// import.meta.dirname is supported by Bun and Node ≥ 21.2 — replaces CJS __dirname.
+const STATE_FILE = process.env.MONITOR_STATE || path.join(import.meta.dirname, "../monitor-state.json");
 const SLACK_WEBHOOK = process.env.SLACK_WEBHOOK || "";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
@@ -394,11 +395,11 @@ async function main() {
   } else {
     console.log("42 Market Monitor");
     console.log("=================");
-    console.log("Usage:");
-    console.log("  node monitor.js run        - Single scan (cron-friendly)");
-    console.log("  node monitor.js watch      - Continuous monitoring");
-    console.log("  node monitor.js status     - Show monitor state & recent alerts");
-    console.log("  node monitor.js reset      - Reset state");
+    console.log("Usage (Bun auto-loads .env; under Node pass --env-file=.env):");
+    console.log("  bun scripts/monitor.js run      - Single scan (cron-friendly)");
+    console.log("  bun scripts/monitor.js watch    - Continuous monitoring");
+    console.log("  bun scripts/monitor.js status   - Show monitor state & recent alerts");
+    console.log("  bun scripts/monitor.js reset    - Reset state");
     console.log("");
     console.log("Environment variables:");
     console.log("  BSC_WALLET_ADDRESS         - Wallet to monitor positions for");

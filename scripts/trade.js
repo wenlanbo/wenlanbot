@@ -1,23 +1,21 @@
-const { ethers } = require("ethers");
+import { ethers } from "ethers";
+import ROUTER_ABI  from "../references/router-abi.json"  with { type: "json" };
+import FACTORY_ABI from "../references/factory-abi.json" with { type: "json" };
+import CURVE_ABI   from "../references/curve-abi.json"   with { type: "json" };
+import LENS_ABI    from "../references/lens-abi.json"    with { type: "json" };
 
 // === CONFIG ===
 const RPC = process.env.BSC_RPC || "https://bsc-dataseed1.binance.org";
 const PRIVATE_KEY = process.env.BSC_PRIVATE_KEY;
 if (!PRIVATE_KEY) { console.error("ERROR: Set BSC_PRIVATE_KEY env var"); process.exit(1); }
-const WALLET = process.env.BSC_WALLET_ADDRESS;
-if (!WALLET) { console.error("ERROR: Set BSC_WALLET_ADDRESS env var"); process.exit(1); }
+// Derive wallet address from the private key — no separate env var needed.
+const WALLET = new ethers.Wallet(PRIVATE_KEY).address;
 
 // Contract addresses (BSC Mainnet Production)
 const ROUTER_ADDR = "0x88888888338e60bfB4657187169cFFa5c8640E42";
 const CURVE_ADDR  = "0x0443E04e70E4285a6cA73eacaC5267f3B4cBb7Da";
 const LENS_ADDR   = "0x9a9846037238599b10f60a59C2607a8c3159E827";
 const USDT_ADDR   = "0x55d398326f99059fF775485246999027B3197955";
-
-// ABIs
-const ROUTER_ABI  = require("../references/router-abi.json");
-const FACTORY_ABI = require("../references/factory-abi.json");
-const CURVE_ABI   = require("../references/curve-abi.json");
-const LENS_ABI    = require("../references/lens-abi.json");
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) returns (bool)",
   "function allowance(address owner, address spender) view returns (uint256)",
