@@ -12,7 +12,7 @@ A complete, agent-agnostic guide for AI agents to trade prediction markets on [4
 
 - **[Bun](https://bun.sh)** — primary runtime. `curl -fsSL https://bun.sh/install | bash`
 - A BSC wallet with some **BNB** for gas (~0.01 BNB ≈ $0.03 per trade) and **B-USDT (BEP-20, 18 decimals)** for trade collateral.
-- Optional: a private BSC RPC. The default (`https://bsc-dataseed1.binance.org`) works for light use but is rate-limited.
+- Optional: a private BSC RPC. The default (`https://bsc-dataseed.bnbchain.org`) works for light use but is rate-limited.
 
 ## Install
 
@@ -38,7 +38,9 @@ cp .env.example .env
 | Variable | Required | Notes |
 |---|---|---|---|
 | `BSC_PRIVATE_KEY` | yes | `0x` + 64 hex. Wallet address is derived automatically. |
-| `BSC_RPC` | no | Defaults to `https://bsc-dataseed1.binance.org`. |
+| `BSC_RPC` | no | Defaults to `https://bsc-dataseed.bnbchain.org`. |
+| `INTEGRATOR_ADDRESS` | no | Integrator wallet to receive trade fees. Optional. |
+| `INTEGRATOR_FEE_BPS` | no | Integrator fee in basis points (100 bps = 1%). Defaults to `0`. Any value > 0 requires `INTEGRATOR_ADDRESS` to be set. |
 | `BSC_WALLET_ADDRESS` | only for `monitor.js` | `trade.ts` and `trade.js` both derive this from `BSC_PRIVATE_KEY`. |
 | `SLACK_WEBHOOK`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MONITOR_*` | optional | See `SKILL.md` §7 for the full list. |
 

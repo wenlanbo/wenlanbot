@@ -33,18 +33,19 @@ function required(name: string, value: string | undefined): string {
 
 // === ADDRESSES (BSC Mainnet Production) ===
 const ROUTER: Address = getAddress(
-  "0xaa2dFc5aa2c140DC9246094A914e6D86ecE2eaaa",
+  "0x888888886619275d33c00D3BC62DF94D700DCD42",
 );
-const LENS: Address = getAddress("0xdE24BDaE2551Cb686eA8734Ec1CebF4F0f966C5a");
-const USDT: Address = getAddress("0x61553e2c0373F6767977cACE65719006197C18ce");
+const LENS: Address = getAddress("0x4AAd5A856941FB64df10362024e3Ece24023d4d1"); // note: lens can be redeployed but the contract itself is immutable, if preferred you can use older versions or deploy one yourself
+const USDT: Address = getAddress("0x55d398326f99059fF775485246999027B3197955");
 const BEBE: Address = getAddress("0x00000000BEBEDB7C30ee418158e26E31a5A8f3E2");
 const MAX_UINT256: bigint = (1n << 256n) - 1n;
 const BEBE_MODE_SINGLE_BATCH: Hex =
   "0x0100000000000000000000000000000000000000000000000000000000000000";
+const TICK_SIZE = 2; // tick size is dependent on the curve itself, but we can assume 2 for now
 
 // === CLIENTS ===
 function loadConfig() {
-  const RPC = process.env.BSC_RPC ?? "https://bsc-dataseed1.binance.org";
+  const RPC = process.env.BSC_RPC ?? "https://bsc-dataseed.bnbchain.org";
   const PK_RAW = required("BSC_PRIVATE_KEY", process.env.BSC_PRIVATE_KEY);
   if (!/^0x[0-9a-fA-F]{64}$/.test(PK_RAW)) {
     throw new Error("BSC_PRIVATE_KEY must be 0x + 64 hex chars");
@@ -58,7 +59,29 @@ function loadConfig() {
     chain: bsc,
     transport: http(RPC),
   });
-  return { account, WALLET, publicClient, walletClient };
+
+  const integratorAddress: Address = getAddress(
+    process.env.INTEGRATOR_ADDRESS || zeroAddress,
+  );
+  const integratorBpsRaw = process.env.INTEGRATOR_FEE_BPS || "0";
+  if (!/^\d+$/.test(integratorBpsRaw)) {
+    throw new Error("INTEGRATOR_FEE_BPS must be a non-negative integer");
+  }
+  const integratorFeeBps = BigInt(integratorBpsRaw);
+  if (integratorAddress === zeroAddress && integratorFeeBps > 0n) {
+    throw new Error(
+      "INTEGRATOR_FEE_BPS > 0 requires INTEGRATOR_ADDRESS to be set",
+    );
+  }
+
+  return {
+    account,
+    WALLET,
+    publicClient,
+    walletClient,
+    integratorAddress,
+    integratorFeeBps,
+  };
 }
 
 type GlobalConfig = ReturnType<typeof loadConfig>;
@@ -66,6 +89,8 @@ let account!: GlobalConfig["account"];
 let WALLET!: GlobalConfig["WALLET"];
 let publicClient!: GlobalConfig["publicClient"];
 let walletClient!: GlobalConfig["walletClient"];
+let integratorAddress!: GlobalConfig["integratorAddress"];
+let integratorFeeBps!: GlobalConfig["integratorFeeBps"];
 
 // === GUESS ENCODING (mirrors 42 frontend) ===
 const DEFAULT_MAX_ITER = 50n;
@@ -175,7 +200,15 @@ async function simulateBuy(
     address: LENS,
     abi: lensV2Abi,
     functionName: "simulateMint",
-    args: [market, BigInt(tokenId), amountWei, true, "0x", dataGuess, 0n],
+    args: [
+      market,
+      BigInt(tokenId),
+      amountWei,
+      true,
+      "0x",
+      dataGuess,
+      integratorFeeBps,
+    ],
   });
   const [pre, post, quote] = result;
   return {
@@ -201,7 +234,15 @@ async function simulateSell(
     address: LENS,
     abi: lensV2Abi,
     functionName: "simulateRedeem",
-    args: [market, BigInt(tokenId), otAmountWei, true, "0x", "0x", 0n],
+    args: [
+      market,
+      BigInt(tokenId),
+      otAmountWei,
+      true,
+      "0x",
+      "0x",
+      integratorFeeBps,
+    ],
   });
   const [pre, post, quote] = result;
   return {
@@ -249,6 +290,11 @@ async function buyOutcome(
 
   // Slippage: minOtOut = expectedOt * (100 - slippage%) / 100
   const slippageBips = BigInt(Math.floor(slippagePct * 100));
+  if (slippagePct > 0 && slippageBips === 0n) {
+    throw new Error(
+      `slippagePct=${slippagePct} is below 1-bps resolution; use 0 for no protection or >= 0.01`,
+    );
+  }
   const minOtOut = (sim.otToUser * (10000n - slippageBips)) / 10000n;
   if (minOtOut <= 0n) throw new Error("minOtOut computed as zero");
 
@@ -275,8 +321,8 @@ async function buyOutcome(
       },
       "0x",
       dataGuess,
-      zeroAddress,
-      0n,
+      integratorAddress,
+      integratorFeeBps,
     ],
     account,
     chain: bsc,
@@ -302,8 +348,13 @@ async function sellOutcome(
   if (slippagePct < 0 || slippagePct >= 100)
     throw new Error("slippage out of range");
   const market = getAddress(marketRaw);
-  const otAmountWei = parseUnits(otAmount, 18);
-  if (otAmountWei <= 0n) throw new Error("otAmount must be > 0");
+  const otAmountTicked = parseFloat(otAmount).toFixed(TICK_SIZE);
+  const otAmountWei = parseUnits(otAmountTicked, 18);
+  if (otAmountWei <= 0n) {
+    throw new Error(
+      `otAmount=${otAmount} rounds to zero at tickSize=${TICK_SIZE}; minimum sellable is 1e-${TICK_SIZE} OT`,
+    );
+  }
 
   // Step 1: Simulate
   console.log("\n  Simulating sell...");
@@ -318,6 +369,11 @@ async function sellOutcome(
 
   // Step 3: Slippage
   const slippageBips = BigInt(Math.floor(slippagePct * 100));
+  if (slippagePct > 0 && slippageBips === 0n) {
+    throw new Error(
+      `slippagePct=${slippagePct} is below 1-bps resolution; use 0 for no protection or >= 0.01`,
+    );
+  }
   const minCollateral =
     (sim.collateralToUser * (10000n - slippageBips)) / 10000n;
   if (minCollateral <= 0n) throw new Error("minCollateral computed as zero");
@@ -345,8 +401,8 @@ async function sellOutcome(
       },
       "0x",
       "0x",
-      zeroAddress,
-      0n,
+      integratorAddress,
+      integratorFeeBps,
     ],
     account,
     chain: bsc,
@@ -754,7 +810,7 @@ function usage(): void {
     "  bun trade.ts portfolio <market>                    show positions",
   );
   console.log(
-    "\nEnvironment: BSC_PRIVATE_KEY (required — wallet address is derived), BSC_RPC (optional)",
+    "\nEnvironment: BSC_PRIVATE_KEY (required — wallet address is derived), BSC_RPC (optional), INTEGRATOR_ADDRESS (optional), INTEGRATOR_FEE_BPS (optional; > 0 requires INTEGRATOR_ADDRESS)",
   );
 }
 
@@ -808,7 +864,14 @@ async function main(): Promise<void> {
     usage();
     process.exit(1);
   }
-  ({ account, WALLET, publicClient, walletClient } = loadConfig());
+  ({
+    account,
+    WALLET,
+    publicClient,
+    walletClient,
+    integratorAddress,
+    integratorFeeBps,
+  } = loadConfig());
   await fn(process.argv);
 }
 
