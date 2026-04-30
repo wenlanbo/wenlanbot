@@ -865,7 +865,7 @@ bun scripts/trade.ts undelegate                            # clear EIP-7702 dele
 bun scripts/trade.ts portfolio <market>                    # show positions (+ claimable)
 ```
 
-Configure via environment variables: `BSC_PRIVATE_KEY` (required — wallet address is derived), `BSC_RPC` (optional override).
+Configure via environment variables: `BSC_PRIVATE_KEY` (required — wallet address is derived), `BSC_RPC` (optional override), `INTEGRATOR_ADDRESS` (optional), `INTEGRATOR_FEE_BPS` (optional, any value > 0 requires `INTEGRATOR_ADDRESS`; 100 bps = 1%).
 
 ---
 
