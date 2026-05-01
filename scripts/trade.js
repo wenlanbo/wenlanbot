@@ -141,11 +141,6 @@ async function buyOutcome(marketAddr, tokenId, usdtAmount, slippagePct = 1) {
 
   const iface = new ethers.Interface(ROUTER_ABI);
 
-  // Transfer USDT into Router
-  const transferCall = iface.encodeFunctionData("erc20TransferFromInitiator", [
-    USDT_ADDR, ROUTER_ADDR, amountWei
-  ]);
-
   // Swap
   const swapCall = iface.encodeFunctionData("swapSimple", [
     marketAddr, WALLET, tokenId,
@@ -153,10 +148,7 @@ async function buyOutcome(marketAddr, tokenId, usdtAmount, slippagePct = 1) {
     "0x", dataGuess
   ]);
 
-  const calls = [
-    { allowFailure: false, callData: transferCall },
-    { allowFailure: false, callData: swapCall }
-  ];
+  const calls = [ { allowFailure: false, callData: swapCall } ];
 
   console.log("  Slippage:", slippagePct + "%", "| Min OT:", ethers.formatUnits(minOtOut, 18));
   console.log("  Executing...");
