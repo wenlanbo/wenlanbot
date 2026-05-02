@@ -6,7 +6,7 @@ A complete, agent-agnostic guide for AI agents to trade prediction markets on [4
 
 - **SKILL.md** — Full trading guide: market mechanics, REST API, on-chain trading, optional 0x and Privy integrations
 - **references/** — Complete smart contract ABIs (Router, Factory, Curve)
-- **scripts/trade.js** — Ready-to-use CLI trading tool
+- **scripts/trade.ts** — Ready-to-use CLI trading tool (TypeScript/Bun)
 
 ## Prerequisites
 
@@ -31,7 +31,7 @@ cp .env.example .env
 # edit .env — BSC_PRIVATE_KEY is required
 ```
 
-> For running `scripts/trade.js` / `scripts/monitor.js` under Node, pass the flag: `node --env-file=.env scripts/trade.js status`.
+> For running `scripts/trade.ts` / `scripts/monitor.js` under Node, pass the flag: `node --env-file=.env scripts/trade.ts status`.
 
 ### Env vars
 
@@ -41,7 +41,7 @@ cp .env.example .env
 | `BSC_RPC` | no | Defaults to `https://bsc-dataseed.bnbchain.org`. |
 | `INTEGRATOR_ADDRESS` | no | Integrator wallet to receive trade fees. Optional. |
 | `INTEGRATOR_FEE_BPS` | no | Integrator fee in basis points (100 bps = 1%). Defaults to `0`. Any value > 0 requires `INTEGRATOR_ADDRESS` to be set. |
-| `BSC_WALLET_ADDRESS` | only for `monitor.js` | `trade.ts` and `trade.js` both derive this from `BSC_PRIVATE_KEY`. |
+| `BSC_WALLET_ADDRESS` | only for `monitor.js` | `trade.ts` derives this from `BSC_PRIVATE_KEY`. |
 | `SLACK_WEBHOOK`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MONITOR_*` | optional | See `SKILL.md` §7 for the full list. |
 
 ## Usage
