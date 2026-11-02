@@ -534,6 +534,7 @@ async function cmdBlitz(argv: string[]): Promise<void> {
     );
   }
   const amount = parseUnits(usdtStr, 18);
+  if (amount <= 0n) throw new Error("usdt must be > 0");
   const usdt = Number(usdtStr);
   const wallet = await bawWallet();
 
