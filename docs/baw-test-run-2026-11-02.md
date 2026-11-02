@@ -179,8 +179,9 @@ Both directions work through `baw contract-call`, and no transaction needed conf
 
 1. **An immediate round trip lost about 24%.** We paid 1 USDT and got 0.7638 back. The quoted
    marginal price (0.0314) is what you pay to buy, not what you get when you sell; the sell
-   returned about 0.0242 per OT. The ~0.4% fee in SKILL.md doesn't explain it. We need to
-   understand and document this curve asymmetry before telling beginners they can "always sell".
+   returned about 0.0242 per OT. The fees (0.0099 + 0.0077 USDT, about 1% each way) don't explain it.
+   42's **redeem tax** does: a variable spread on sells before resolution, larger for big sales, thin
+   supply and markets close to resolution. The tutorial warns about it before the first trade.
 2. **Preview can't look ahead.** The buy can't be previewed until the approval is mined, because
    the simulation fails without the allowance. So each step goes preview → execute → wait for receipt → next.
 3. **Binance's preview labels 42 swaps as "sale",** and doesn't show the ERC-6909 outcome tokens

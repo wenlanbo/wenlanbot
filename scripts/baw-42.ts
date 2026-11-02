@@ -69,6 +69,11 @@ function parseSlippage(raw: string | undefined, fallback: number): bigint {
   return BigInt(Math.round(pct * 100));
 }
 
+function parseTokenId(raw: string | undefined): bigint {
+  if (!raw || !/^\d+$/.test(raw)) throw new Error(`tokenId must be a non-negative integer (got ${raw ?? "nothing"}); list them with: market <market>`);
+  return BigInt(raw);
+}
+
 function addr(raw: string | undefined, what: string): Address {
   if (!raw || !isAddress(raw)) throw new Error(`invalid ${what}: ${raw}`);
   return getAddress(raw);
@@ -225,7 +230,7 @@ async function cmdMarket(argv: string[]): Promise<void> {
 
 async function cmdBuy(argv: string[]): Promise<void> {
   const market = addr(argv[0], "market");
-  const tokenId = BigInt(argv[1] ?? "x");
+  const tokenId = parseTokenId(argv[1]);
   const usdtStr = argv[2];
   if (!usdtStr) throw new Error("usage: buy <market> <tokenId> <usdt> [slippage%]");
   const slipBps = parseSlippage(argv[3], DEFAULT_SLIPPAGE_PCT);
@@ -272,7 +277,7 @@ async function cmdBuy(argv: string[]): Promise<void> {
 
 async function cmdSell(argv: string[]): Promise<void> {
   const market = addr(argv[0], "market");
-  const tokenId = BigInt(argv[1] ?? "x");
+  const tokenId = parseTokenId(argv[1]);
   const amountRaw = argv[2] ?? "all";
   const slipBps = parseSlippage(argv[3], DEFAULT_SLIPPAGE_PCT);
 
@@ -405,26 +410,43 @@ function cleanPreview(p: any, expect: PreviewExpectation): string | null {
     return `preview targets ${target ?? "no contract"}, expected ${expect.to}`;
   }
 
-  // Simulated balance changes are JSON numbers (lossy above 2^53), so compare with a 0.01% margin
-  for (const c of d.simulationResult?.balanceChanges ?? []) {
-    if (typeof c?.owner !== "string" || c.owner.toLowerCase() !== expect.wallet.toLowerCase()) continue;
-    const change = Number(c.change);
-    if (!Number.isFinite(change)) return `unreadable balance change ${JSON.stringify(c)}`;
-    const isUsdt = typeof c.contractAddress === "string" && c.contractAddress.toLowerCase() === USDT.toLowerCase();
-    if (!isUsdt) {
+  const sim = d.simulationResult;
+  if (!Array.isArray(sim.balanceChanges) || !Array.isArray(sim.allowanceChanges) || !Array.isArray(sim.authorityChanges)) {
+    return "simulation result is missing balance, allowance or authority changes";
+  }
+
+  // Simulated amounts are JSON numbers (lossy above 2^53), so compare with a 0.01% margin
+  const isAddr = (v: unknown): v is string => typeof v === "string" && isAddress(v);
+  let usdtOut = 0;
+  for (const c of sim.balanceChanges) {
+    const change = Number(c?.change);
+    if (!isAddr(c?.owner) || !isAddr(c?.contractAddress) || !Number.isFinite(change)) {
+      return `unreadable balance change ${JSON.stringify(c)}`;
+    }
+    if (getAddress(c.owner) !== expect.wallet) continue;
+    if (getAddress(c.contractAddress) !== USDT) {
       if (change < 0) return `simulation spends a token other than USDT: ${JSON.stringify(c)}`;
       continue;
     }
-    if (change < 0 && -change > Number(expect.maxUsdtOut) * 1.0001) {
-      return `simulation spends ${-change / 1e18} USDT, more than the ${fmt(expect.maxUsdtOut)} expected`;
-    }
+    if (change < 0) usdtOut += -change;
   }
-  for (const a of d.simulationResult?.allowanceChanges ?? []) {
-    if (Number(a?.postAmount) > Number(a?.preAmount)) return `simulation raises an allowance: ${JSON.stringify(a)}`;
+  if (usdtOut > Number(expect.maxUsdtOut) * 1.0001) {
+    return `simulation spends ${usdtOut / 1e18} USDT, more than the ${fmt(expect.maxUsdtOut)} expected`;
   }
-  if (d.simulationResult?.authorityChanges?.length) return `simulation changes wallet authority: ${JSON.stringify(d.simulationResult.authorityChanges)}`;
+  if (expect.maxUsdtOut > 0n && usdtOut === 0) return "simulation shows no USDT being spent, which doesn't match a mint";
+  for (const a of sim.allowanceChanges) {
+    const pre = Number(a?.preAmount);
+    const post = Number(a?.postAmount);
+    if (!Number.isFinite(pre) || !Number.isFinite(post)) return `unreadable allowance change ${JSON.stringify(a)}`;
+    if (post > pre) return `simulation raises an allowance: ${JSON.stringify(a)}`;
+  }
+  if (sim.authorityChanges.length) return `simulation changes wallet authority: ${JSON.stringify(sim.authorityChanges)}`;
   return null;
 }
+
+// Execute errors that Binance raises before anything is signed, so retrying cannot double-send:
+// another tx still pending, simulation failed, risk-blocked, Developer Mode expired or over the cap
+const EXECUTE_REJECTED_BEFORE_BROADCAST = new Set([351716, 953401, 351805, 351803, 351802, 351804]);
 
 // "not-sent": nothing was broadcast, safe to retry. Once broadcast, never retry: the tx may still land.
 type SendResult =
@@ -459,8 +481,16 @@ async function previewExecute(data: Hex, expect: PreviewExpectation, label: stri
       console.log(`  ${label}: waiting for confirmation in the Binance App (order ${e.data.orderId}); not retrying`);
       return { sent: true, hash: "0x" as Hex, status: "unconfirmed" };
     }
-    console.log(`  ${label}: execute failed ${JSON.stringify(e?.error ?? e?.data)}`);
-    return { sent: false };
+    if (e?.success === false && EXECUTE_REJECTED_BEFORE_BROADCAST.has(Number(e.error?.code))) {
+      console.log(`  ${label}: execute rejected before broadcast ${JSON.stringify(e.error)}`);
+      return { sent: false };
+    }
+    // Anything else might have been submitted, so stop instead of risking a second send
+    console.log(
+      `  ${label}: execute returned an unrecognised result ${JSON.stringify(e?.error ?? e?.data)}; not retrying.` +
+        " Check `baw wallet tx-history --json`.",
+    );
+    return { sent: true, hash: "0x" as Hex, status: "unconfirmed" };
   }
   const hash = e.data.txHash;
   if (typeof hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {

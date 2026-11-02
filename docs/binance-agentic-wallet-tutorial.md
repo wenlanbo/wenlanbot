@@ -175,7 +175,7 @@ It's larger when your sale is a big share of that outcome's supply, when the out
 and as the market gets close to resolution. The tax stays in the pool.
 
 **Real example from our test:** we bought 31.51 tokens for **1.00 USDT** and sold them straight back for
-**0.7637 USDT**, a **24% round-trip loss**, although the listed fee is only about 0.4%.
+**0.7637 USDT**, a **24% round-trip loss**. Fees were only about 1% each way (0.0099 USDT on the buy, 0.0077 on the sell).
 
 So: **buy what you're willing to hold until resolution.** "I can always sell" is true, but not at the price
 you paid. The `sell` quote prints `amount x price` next to the real `expected` amount so you can see the gap
@@ -183,7 +183,8 @@ before you commit.
 
 ### Fees
 
-- Regular markets: about 0.4% protocol fee on the trade (shown as `fee` in each quote).
+- Regular markets: about 1% per trade in our test (0.0099 USDT on a 1 USDT buy). SKILL.md lists a lower
+  protocol rate, so go by the `fee` line in each quote, which comes from 42's own simulation.
 - Blitz: 1.0% protocol fee (plus an integrator fee in apps that charge one).
 
 ---
