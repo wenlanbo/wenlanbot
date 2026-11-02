@@ -81,13 +81,23 @@ async function getJson(url: string): Promise<any> {
 }
 
 async function baw(args: string[]): Promise<any> {
-  const proc = Bun.spawn(["baw", ...args, "--json"], { stdout: "pipe", stderr: "pipe" });
-  const out = await new Response(proc.stdout).text();
-  await proc.exited;
+  let proc;
+  try {
+    proc = Bun.spawn(["baw", ...args, "--json"], { stdout: "pipe", stderr: "pipe" });
+  } catch {
+    throw new Error("could not run `baw`; install it with: npm install -g @binance/agentic-wallet@1.12.0");
+  }
+  const [out, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  // baw reports most failures as {"success":false,...} JSON, so parse stdout first
   try {
     return JSON.parse(out);
   } catch {
-    throw new Error(`baw ${args[0]} returned non-JSON output; is the baw CLI installed?`);
+    const detail = (err.trim() || out.trim() || "no output").split("\n").slice(0, 3).join(" | ");
+    throw new Error(`baw ${args.slice(0, 2).join(" ")} failed (exit ${code}): ${detail}`);
   }
 }
 
@@ -181,6 +191,24 @@ async function cmdWallet(): Promise<void> {
   console.log(`  USDT:                      ${fmt(usdt)}`);
   console.log(`  USDT approved to Router:   ${fmt(allowance)}`);
   if (bnb === 0n) console.log("  ! No BNB: you need a little BNB on BSC to pay gas.");
+}
+
+// Sets the Router's USDT allowance to exactly <usdt> (it replaces the current allowance, it does not add)
+async function cmdApprove(argv: string[]): Promise<void> {
+  const usdtStr = argv[0];
+  if (!usdtStr) throw new Error("usage: approve <usdt>   (use 0 to revoke)");
+  const amount = parseUnits(usdtStr, 18);
+  if (amount < 0n) throw new Error("usdt must be >= 0");
+  const wallet = await bawWallet();
+  const current = await publicClient.readContract({ address: USDT, abi: erc20Abi, functionName: "allowance", args: [wallet, ROUTER] });
+  console.log(`USDT allowance for the 42 Router: ${fmt(current)} -> ${usdtStr} (this replaces the current allowance)`);
+  printTxs(wallet, [
+    {
+      step: amount === 0n ? "revoke the 42 Router's USDT allowance" : `approve the 42 Router to spend up to ${usdtStr} USDT in total`,
+      to: USDT,
+      inputData: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [ROUTER, amount] }),
+    },
+  ]);
 }
 
 async function cmdMarket(argv: string[]): Promise<void> {
@@ -357,35 +385,109 @@ async function cmdBlitzRounds(): Promise<void> {
   }
 }
 
-function cleanPreview(p: any, to: Address): string | null {
-  if (!p.success) return `preview error ${p.error?.code}: ${p.error?.message}`;
+// What the simulated transaction may do to the wallet's USDT: a mint may spend at most
+// `maxUsdtOut`; a claim (maxUsdtOut = 0) must not spend any.
+type PreviewExpectation = { wallet: Address; to: Address; maxUsdtOut: bigint };
+
+// Binance's preview does not echo the calldata back, so the auto-execute gate binds the
+// preview to our intent through what it can check: target contract, simulated balance
+// changes, and the shape of the ids it returns. Anything missing or unexpected fails closed.
+function cleanPreview(p: any, expect: PreviewExpectation): string | null {
+  if (p?.success !== true) return `preview error ${p?.error?.code}: ${p?.error?.message}`;
   const d = p.data;
+  if (typeof d?.requestId !== "string" || !/^[0-9a-zA-Z_-]{8,128}$/.test(d.requestId)) return "missing or malformed requestId";
   if (d.simulationResult?.simulationCode !== "000000000") return `simulation ${d.simulationResult?.simulationCode}`;
   if (d.risks?.riskDetails?.length) return `risks: ${JSON.stringify(d.risks.riskDetails)}`;
   if (Object.keys(d.risks?.addresses ?? {}).length) return `address risks: ${JSON.stringify(d.risks.addresses)}`;
-  if (d.requireConfirmation) return "requires confirmation in the Binance App";
-  if (d.parsedTx?.contractAddress && getAddress(d.parsedTx.contractAddress) !== to) {
-    return `unexpected contract ${d.parsedTx.contractAddress}`;
+  if (d.requireConfirmation !== false) return "requires confirmation in the Binance App";
+  const target = d.parsedTx?.contractAddress;
+  if (typeof target !== "string" || !isAddress(target) || getAddress(target) !== expect.to) {
+    return `preview targets ${target ?? "no contract"}, expected ${expect.to}`;
   }
+
+  // Simulated balance changes are JSON numbers (lossy above 2^53), so compare with a 0.01% margin
+  for (const c of d.simulationResult?.balanceChanges ?? []) {
+    if (typeof c?.owner !== "string" || c.owner.toLowerCase() !== expect.wallet.toLowerCase()) continue;
+    const change = Number(c.change);
+    if (!Number.isFinite(change)) return `unreadable balance change ${JSON.stringify(c)}`;
+    const isUsdt = typeof c.contractAddress === "string" && c.contractAddress.toLowerCase() === USDT.toLowerCase();
+    if (!isUsdt) {
+      if (change < 0) return `simulation spends a token other than USDT: ${JSON.stringify(c)}`;
+      continue;
+    }
+    if (change < 0 && -change > Number(expect.maxUsdtOut) * 1.0001) {
+      return `simulation spends ${-change / 1e18} USDT, more than the ${fmt(expect.maxUsdtOut)} expected`;
+    }
+  }
+  for (const a of d.simulationResult?.allowanceChanges ?? []) {
+    if (Number(a?.postAmount) > Number(a?.preAmount)) return `simulation raises an allowance: ${JSON.stringify(a)}`;
+  }
+  if (d.simulationResult?.authorityChanges?.length) return `simulation changes wallet authority: ${JSON.stringify(d.simulationResult.authorityChanges)}`;
   return null;
 }
 
-// Preview, then execute only if the preview is clean, then wait for the receipt
-async function previewExecute(wallet: Address, to: Address, data: Hex, label: string): Promise<Hex | null> {
-  const p = await baw(["contract-call", "preview", "--binanceChainId", BINANCE_CHAIN_ID, "--from", wallet, "--to", to, "--value", "0", "--inputData", data]);
-  const bad = cleanPreview(p, to);
+// "not-sent": nothing was broadcast, safe to retry. Once broadcast, never retry: the tx may still land.
+type SendResult =
+  | { sent: false }
+  | { sent: true; hash: Hex; status: "success" | "reverted" | "unconfirmed" };
+
+// Preview, execute only if the preview is clean, then wait for the receipt
+async function previewExecute(data: Hex, expect: PreviewExpectation, label: string): Promise<SendResult> {
+  let p;
+  try {
+    p = await baw(["contract-call", "preview", "--binanceChainId", BINANCE_CHAIN_ID, "--from", expect.wallet, "--to", expect.to, "--value", "0", "--inputData", data]);
+  } catch (err) {
+    console.log(`  ${label}: preview failed (${(err as Error).message}); not sending`);
+    return { sent: false };
+  }
+  const bad = cleanPreview(p, expect);
   if (bad) {
     console.log(`  ${label}: preview not clean (${bad}); not sending`);
-    return null;
+    return { sent: false };
   }
-  const e = await baw(["contract-call", "execute", "--requestId", p.data.requestId]);
-  if (!e.success || e.data.status !== "BROADCASTED") {
-    console.log(`  ${label}: execute failed ${JSON.stringify(e.error ?? e.data)}`);
-    return null;
+
+  let e;
+  try {
+    e = await baw(["contract-call", "execute", "--requestId", p.data.requestId]);
+  } catch (err) {
+    // The CLI died mid-execute: we can't tell whether it broadcast, so stop rather than retry
+    console.log(`  ${label}: execute failed (${(err as Error).message}). Check \`baw wallet tx-history --json\` before trying again.`);
+    return { sent: true, hash: "0x" as Hex, status: "unconfirmed" };
   }
-  const r = await publicClient.waitForTransactionReceipt({ hash: e.data.txHash, timeout: 60_000 });
-  console.log(`  ${label}: ${r.status} https://bscscan.com/tx/${e.data.txHash}`);
-  return r.status === "success" ? (e.data.txHash as Hex) : null;
+  if (e?.success !== true || e.data?.status !== "BROADCASTED") {
+    if (e?.data?.status === "PENDING_CONFIRMATION") {
+      console.log(`  ${label}: waiting for confirmation in the Binance App (order ${e.data.orderId}); not retrying`);
+      return { sent: true, hash: "0x" as Hex, status: "unconfirmed" };
+    }
+    console.log(`  ${label}: execute failed ${JSON.stringify(e?.error ?? e?.data)}`);
+    return { sent: false };
+  }
+  const hash = e.data.txHash;
+  if (typeof hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+    console.log(`  ${label}: broadcast reported a malformed txHash ${JSON.stringify(hash)}; not retrying`);
+    return { sent: true, hash: "0x" as Hex, status: "unconfirmed" };
+  }
+  try {
+    const r = await publicClient.waitForTransactionReceipt({ hash: hash as Hex, timeout: 120_000 });
+    console.log(`  ${label}: ${r.status} https://bscscan.com/tx/${hash}`);
+    return { sent: true, hash: hash as Hex, status: r.status };
+  } catch {
+    console.log(`  ${label}: broadcast but not confirmed within 120s: https://bscscan.com/tx/${hash}`);
+    return { sent: true, hash: hash as Hex, status: "unconfirmed" };
+  }
+}
+
+// REST read that survives transient failures; returns null if it keeps failing
+async function marketOutcomesRetry(market: Address) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await marketOutcomes(market);
+    } catch (err) {
+      console.log(`  (42 API error: ${(err as Error).message}; retrying)`);
+      await sleep(2000);
+    }
+  }
+  return null;
 }
 
 async function cmdBlitz(argv: string[]): Promise<void> {
@@ -409,7 +511,7 @@ async function cmdBlitz(argv: string[]): Promise<void> {
   if (allowance < amount) {
     throw new Error(
       `Router allowance ${fmt(allowance)} < ${usdtStr} USDT. Approve ahead of time (there is no time inside the window):\n` +
-        `  ${previewCommand(wallet, { step: "", to: USDT, inputData: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [ROUTER, amount] }) })}`,
+        `  bun scripts/baw-42.ts approve <usdt>     e.g. approve ${usdtStr} for one round, or more for several`,
     );
   }
 
@@ -434,11 +536,17 @@ async function cmdBlitz(argv: string[]): Promise<void> {
   // Binance simulates against the latest mined block, which can still be stamped before
   // tradingStart for a moment after the window opens, so start one second in
   while (Date.now() < round.tradingStart * 1000 + 1000) await sleep(50);
+  const mintExpect: PreviewExpectation = { wallet, to: ROUTER, maxUsdtOut: amount };
   if (dryRun) {
     let result = "window closed";
     while (now() < round.tradingEnd - 1) {
-      const p = await baw(["contract-call", "preview", "--binanceChainId", BINANCE_CHAIN_ID, "--from", wallet, "--to", ROUTER, "--value", "0", "--inputData", data]);
-      const bad = cleanPreview(p, ROUTER);
+      let bad: string | null;
+      try {
+        const p = await baw(["contract-call", "preview", "--binanceChainId", BINANCE_CHAIN_ID, "--from", wallet, "--to", ROUTER, "--value", "0", "--inputData", data]);
+        bad = cleanPreview(p, mintExpect);
+      } catch (err) {
+        bad = (err as Error).message;
+      }
       console.log(`  dry run: preview ${bad ?? "clean"}`);
       if (!bad) {
         result = "clean";
@@ -449,38 +557,61 @@ async function cmdBlitz(argv: string[]): Promise<void> {
     return;
   }
 
-  let mintTx: Hex | null = null;
-  while (!mintTx && now() < round.tradingEnd - 1) {
-    mintTx = await previewExecute(wallet, ROUTER, data, "mint");
+  // Retry only while nothing has been broadcast, so a slow receipt never causes a second mint
+  let mint: SendResult = { sent: false };
+  while (!mint.sent && now() < round.tradingEnd - 1) {
+    mint = await previewExecute(data, mintExpect, "mint");
   }
-  if (!mintTx) {
+  if (!mint.sent) {
     console.log("  Missed the window; nothing was bought.");
     return;
   }
-
-  // Settlement: Lens getUserState reverts on ended Blitz markets, so use REST + balanceOf
-  let m = await marketOutcomes(market);
-  while (m.status !== "finalised") {
-    await sleep(4000);
-    m = await marketOutcomes(market);
+  if (mint.status === "reverted") {
+    console.log("  The mint reverted on-chain (only gas was spent); nothing was bought.");
+    return;
   }
-  const winnerId = BigInt(m.resolvedAnswer ?? "0");
+
+  // From here the stake may be locked, so every exit says how to claim later
+  const recovery = `When the round is finalised, check and claim with: bun scripts/baw-42.ts claim ${market}`;
+
+  // Settlement: Lens getUserState reverts on ended Blitz markets, so use REST + balanceOf.
+  // Rounds settled about 15s after raceEnd in testing; give up after 5 minutes.
+  const deadline = round.raceEnd + 300;
+  let m = await marketOutcomesRetry(market);
+  while (m?.status !== "finalised" && now() < deadline) {
+    await sleep(4000);
+    m = (await marketOutcomesRetry(market)) ?? m;
+  }
+  if (!m || m.status !== "finalised" || m.resolvedAnswer === null) {
+    console.log(`  Round not finalised after 5 minutes (status: ${m?.status ?? "unknown"}).\n  ${recovery}`);
+    return;
+  }
+  const winnerId = BigInt(m.resolvedAnswer);
   const winner = outcomes.find((o) => BigInt(o.tokenId) === winnerId)?.name ?? `tokenId ${winnerId}`;
   console.log(`  Winner: ${winner}.`);
   if (winnerId !== tokenId) {
     console.log(`  You picked ${pick.name}: the ${usdtStr} USDT stake is lost. Nothing to claim.`);
     return;
   }
-  const holding = await publicClient.readContract({ address: market, abi: marketAbi, functionName: "balanceOf", args: [wallet, tokenId] });
-  const before = await publicClient.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [wallet] });
-  const claimData = encodeFunctionData({ abi: marketAbi, functionName: "claim", args: [wallet, [tokenId], [holding]] });
-  const claimTx = await previewExecute(wallet, market, claimData, "claim");
-  if (!claimTx) {
-    console.log(`  Claim not sent; run: bun scripts/baw-42.ts claim ${market}`);
-    return;
+
+  try {
+    const holding = await publicClient.readContract({ address: market, abi: marketAbi, functionName: "balanceOf", args: [wallet, tokenId] });
+    if (holding === 0n) {
+      console.log(`  You hold no ${pick.name}: the mint did not land (${mint.hash}). Nothing to claim.`);
+      return;
+    }
+    const before = await publicClient.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [wallet] });
+    const claimData = encodeFunctionData({ abi: marketAbi, functionName: "claim", args: [wallet, [tokenId], [holding]] });
+    const claim = await previewExecute(claimData, { wallet, to: market, maxUsdtOut: 0n }, "claim");
+    if (!claim.sent || claim.status !== "success") {
+      console.log(`  Claim not completed. ${recovery}`);
+      return;
+    }
+    const after = await publicClient.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [wallet] });
+    console.log(`  Claimed ${fmt(after - before)} USDT for a ${usdtStr} USDT stake.`);
+  } catch (err) {
+    console.log(`  Error while claiming: ${(err as Error).message}\n  ${recovery}`);
   }
-  const after = await publicClient.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [wallet] });
-  console.log(`  Claimed ${fmt(after - before)} USDT for a ${usdtStr} USDT stake.`);
 }
 
 function help(): void {
@@ -488,6 +619,7 @@ function help(): void {
 
 Usage:
   bun scripts/baw-42.ts wallet                                  Agentic Wallet address, BNB, USDT, Router allowance
+  bun scripts/baw-42.ts approve <usdt>                          set the Router's USDT allowance to exactly <usdt> (0 = revoke)
   bun scripts/baw-42.ts market <market>                         outcomes, tokenIds and prices
   bun scripts/baw-42.ts buy <market> <tokenId> <usdt> [slip%]   quote + baw commands to buy (default slippage ${DEFAULT_SLIPPAGE_PCT}%)
   bun scripts/baw-42.ts sell <market> <tokenId> [amount|all] [slip%]
@@ -505,6 +637,7 @@ Tutorial: docs/binance-agentic-wallet-tutorial.md`);
 // === MAIN ===
 const commands: Record<string, (argv: string[]) => Promise<void>> = {
   wallet: () => cmdWallet(),
+  approve: cmdApprove,
   market: cmdMarket,
   buy: cmdBuy,
   sell: cmdSell,
@@ -513,15 +646,21 @@ const commands: Record<string, (argv: string[]) => Promise<void>> = {
   blitz: cmdBlitz,
 };
 
-const [cmd, ...rest] = process.argv.slice(2);
-const run = cmd ? commands[cmd] : undefined;
-if (!run) {
-  help();
-  process.exit(cmd && cmd !== "help" ? 1 : 0);
+async function main(): Promise<void> {
+  const [cmd, ...rest] = process.argv.slice(2);
+  const run = cmd ? commands[cmd] : undefined;
+  if (!run) {
+    help();
+    process.exit(cmd && cmd !== "help" ? 1 : 0);
+  }
+  try {
+    await run(rest);
+  } catch (e) {
+    console.error(`Error: ${(e as Error).message.split("\n").slice(0, 6).join("\n")}`);
+    process.exit(1);
+  }
 }
-try {
-  await run(rest);
-} catch (e) {
-  console.error(`Error: ${(e as Error).message.split("\n").slice(0, 6).join("\n")}`);
-  process.exit(1);
-}
+
+if (import.meta.main) await main();
+
+export { cleanPreview, type PreviewExpectation };

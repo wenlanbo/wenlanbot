@@ -210,8 +210,8 @@ curl -s "https://rest.ft.42.space/api/v1/token-races?limit=100"
 curl -s "https://rest.ft.42.space/api/v1/markets/<marketAddress>"   # outcomes: tokenId 1=BTC Win, 2=ETH Win, 4=SOL Win
 ```
 
-- Rounds are scheduled about every 37 seconds. Rounds were live after 16:00 UTC, even though
-  the docs say 08:00–16:00 UTC. The list runs about 40 minutes ahead.
+- Rounds are scheduled about every 37 seconds. The last round of the day started just before 20:00 UTC,
+  even though the docs say 08:00–16:00 UTC. The list runs about 40 minutes ahead.
 - **The outcome IDs are 1, 2 and 4, not 0, 1, 2.** Lens `simulateMint` will happily quote IDs 0 and 3, which
   don't exist, so always take the IDs from the REST API.
 - REST `status` can still say `not_started` while trading is open, so go by the timestamps.

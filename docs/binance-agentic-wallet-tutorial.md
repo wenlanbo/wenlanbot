@@ -289,6 +289,8 @@ BTC, ETH and SOL. You back one, and that round's whole pool goes to the winner's
 
 - **Mint only.** You can't sell; your stake is locked until the round settles.
 - **10-second trading window** (`tradingStart` → `tradingEnd`). Outside it the Router reverts.
+- Rounds run every ~37 seconds during the day. On our test day the last one started just before 20:00 UTC;
+  `blitz rounds` shows what's scheduled.
 - The price is flat (0.1) when the window opens and moves once the race starts.
 - **You have to claim if you win.**
 
@@ -302,8 +304,9 @@ bun scripts/baw-42.ts blitz rounds                        # upcoming rounds
 bun scripts/baw-42.ts blitz random 1 --dry-run            # rehearse: preview in the real window, send nothing
 
 # approve USDT for the Router ahead of time: there's no room for an approval inside the window.
-#   If the allowance is too low, `blitz` stops and prints the approval preview command for one round's
-#   amount. To cover several rounds, approve more with `buy`'s approval step or the Binance skill.
+#   `approve` sets the allowance to exactly this total (it replaces, not adds), e.g. 5 USDT = five 1-USDT rounds.
+#   Then preview -> execute -> wait as in Step 8.3. If the allowance runs out, `blitz` stops before the round.
+bun scripts/baw-42.ts approve 5
 bun scripts/baw-42.ts blitz 1 1 --yes                     # 1 USDT on tokenId 1 (BTC Win) in the next round
 bun scripts/baw-42.ts blitz random 1 --yes                # random outcome
 ```
@@ -334,7 +337,7 @@ Things we learned:
 ## Safety checklist
 
 - Keep only what you're prepared to lose in the trading wallet. Developer Mode requires a small balance anyway.
-- Approve exact amounts. `baw approvals list --json` shows what's approved; revoke what you no longer need.
+- Approve exact amounts. `baw approvals list --json` shows what's approved; `bun scripts/baw-42.ts approve 0` revokes the Router's USDT allowance.
 - Always read the preview before `execute`, especially `risks` and `allowanceChanges`.
 - Never paste session tokens or wallet secrets into chats or issues. The `baw` CLI never needs them in commands.
 - Do your own research. Nothing here is investment advice.

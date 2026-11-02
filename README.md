@@ -61,7 +61,7 @@ baw contract-call execute --requestId <id> --json
 bun scripts/baw-42.ts wait <txHash>
 ```
 
-Also: `sell`, `claim`, `blitz rounds`, `blitz <tokenId|random> <usdt> --dry-run|--yes`. See `bun scripts/baw-42.ts help`.
+Also: `sell`, `claim`, `approve <usdt>` (0 = revoke), `blitz rounds`, `blitz <tokenId|random> <usdt> --dry-run|--yes`. See `bun scripts/baw-42.ts help`.
 
 ## Option B: Private key (`scripts/trade.ts`)
 
